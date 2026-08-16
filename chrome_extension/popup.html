@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ASL Translator</title>
+    <link rel="stylesheet" href="popup.css">
+    
+    <!-- MediaPipe Local Bundled Scripts -->
+    <script src="vendor/camera_utils.js"></script>
+    <script src="vendor/hands.js"></script>
+</head>
+<body>
+    <div class="popup-wrapper">
+        <!-- Header -->
+        <header class="popup-header">
+            <div class="logo-box">
+                <span class="logo-text">ASL</span>
+            </div>
+            <div class="header-title-box">
+                <h1 class="header-title">ASL Translator</h1>
+                <span id="header-status" class="status-indicator">Camera Ready</span>
+            </div>
+            <button id="btn-open-sidepanel" class="icon-btn" title="Open in Browser Side Panel">
+                <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2zm10 1v10h4a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1h-4z"/>
+                </svg>
+            </button>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="popup-nav">
+            <button class="tab-btn active" data-target="panel-translate">Live Camera</button>
+            <button class="tab-btn" data-target="panel-dictionary">Symbol Directory</button>
+        </nav>
+
+        <!-- Tab 1: Live Translator -->
+        <div id="panel-translate" class="tab-panel active">
+            <!-- Mode Toggle Bar -->
+            <div class="mode-select-container" style="display: flex; background: #111827; padding: 2px; border-radius: 6px; border: 1px solid #1e293b; gap: 2px; margin-bottom: 2px;">
+                <button id="popup-mode-spelling" class="btn btn-xs active" style="padding: 4px; font-size: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; flex: 1; transition: all 0.2s; background: #6366f1; color: white;">Spelling Mode</button>
+                <button id="popup-mode-phrases" class="btn btn-xs" style="padding: 4px; font-size: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; flex: 1; transition: all 0.2s; background: transparent; color: #94a3b8;">Phrase Mode</button>
+            </div>
+            <!-- Camera Viewport -->
+            <div class="camera-box">
+                <video id="popup-video" playsinline muted></video>
+                <canvas id="popup-canvas"></canvas>
+                
+                <div id="popup-cam-placeholder" class="camera-placeholder">
+                    <button id="btn-toggle-cam" class="btn btn-primary btn-sm">
+                        <span>📷 Start Camera</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Prediction Status -->
+            <div class="pred-strip">
+                <div class="pred-symbol-box">
+                    <span id="popup-pred-char" class="pred-char">—</span>
+                </div>
+                <div class="pred-meta-box">
+                    <div class="pred-meta-top">
+                        <span id="popup-pred-label" class="pred-label">No hand detected</span>
+                        <span id="popup-confidence" class="confidence-tag">0%</span>
+                    </div>
+                    <div class="meter-bar">
+                        <div id="popup-hold-fill" class="meter-fill"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Text Buffer Area -->
+            <div class="text-buffer-box">
+                <textarea id="popup-text-buffer" rows="3" placeholder="Signs you perform will type here..."></textarea>
+            </div>
+
+            <!-- Controls -->
+            <div class="controls-row">
+                <button id="btn-popup-space" class="btn btn-subtle btn-xs">␣ Space</button>
+                <button id="btn-popup-backspace" class="btn btn-subtle btn-xs">⌫ Back</button>
+                <button id="btn-popup-clear" class="btn btn-subtle btn-xs">✕ Clear</button>
+                <button id="btn-popup-speak" class="btn btn-subtle btn-xs">🔊 Speak</button>
+                <button id="btn-popup-copy" class="btn btn-subtle btn-xs">📋 Copy</button>
+            </div>
+
+            <button id="btn-inject-text" class="btn btn-emerald btn-block">
+                <span>✍️ Insert into Active Webpage</span>
+            </button>
+        </div>
+
+        <!-- Tab 2: Quick Symbol Directory -->
+        <div id="panel-dictionary" class="tab-panel">
+            <div class="dict-search-wrap">
+                <input id="popup-search" type="text" class="search-input-mini" placeholder="Search ASL symbols...">
+            </div>
+            <div id="popup-dict-list" class="dict-list-scroll"></div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="weights.js"></script>
+    <script src="classifier.js"></script>
+    <script src="gestures.js"></script>
+    <script src="popup.js"></script>
+</body>
+</html>

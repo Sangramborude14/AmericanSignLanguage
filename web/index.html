@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="American Sign Language (ASL) Detection & Live Translator - Real-time sign-to-text typing with voice synthesis and symbol showcase directory.">
+    <title>ASL Studio | Real-Time Sign Language Translator & Symbol Showcase</title>
+    
+    <!-- Design System Stylesheet -->
+    <link rel="stylesheet" href="css/style.css">
+    
+    <!-- MediaPipe Hands & Camera Utils -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+    <!-- App Header -->
+    <header class="app-header">
+        <div class="header-container">
+            <div class="logo-wrap">
+                <div class="logo-badge">ASL</div>
+                <div>
+                    <h1 class="app-title">ASL Studio & Translator</h1>
+                    <p class="app-subtitle">Real-Time Gesture Recognition</p>
+                </div>
+            </div>
+            <nav class="header-nav">
+                <a href="#studio-section" class="nav-link active">Live Translator</a>
+                <a href="#dictionary-section" class="nav-link">Symbol Showcase</a>
+                <a href="#practice-section" class="nav-link">Practice Mode</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="app-main">
+        <!-- Section 1: Live Translator & Text Studio -->
+        <section id="studio-section">
+            <div class="section-header">
+                <h2 class="section-title">Sign-to-Text Live Studio</h2>
+                <p class="section-desc">Show ASL signs to your camera to build sentences with hold-to-type, smart suggestions, and speech readout.</p>
+            </div>
+
+            <div class="studio-grid">
+                <!-- Left Panel: Webcam Stream & Visual Feedback -->
+                <div class="studio-panel">
+                    <div class="camera-controls-bar">
+                        <div class="badge-group">
+                            <span id="status-badge" class="badge badge-neutral">Camera Off</span>
+                            <span id="fps-badge" class="badge badge-neutral">0 FPS</span>
+                            <span id="gesture-type-badge" class="badge badge-neutral">Ready</span>
+                        </div>
+                        <div style="display: flex; gap: 0.5rem; align-items: center;">
+                            <div class="mode-select-container" style="display: flex; background: var(--bg-surface-elevated); padding: 0.2rem; border-radius: var(--radius-md); border: 1px solid var(--border-color); gap: 0.2rem;">
+                                <button id="mode-spelling" class="btn btn-xs active" style="padding: 0.35rem 0.75rem; font-size: 0.75rem; border: none; border-radius: var(--radius-sm); cursor: pointer; font-weight: 600; transition: all 0.2s;">Spelling (A-Z)</button>
+                                <button id="mode-phrases" class="btn btn-xs" style="padding: 0.35rem 0.75rem; font-size: 0.75rem; border: none; border-radius: var(--radius-sm); cursor: pointer; font-weight: 600; transition: all 0.2s;">Phrases</button>
+                            </div>
+                            <button id="btn-start-camera" class="btn btn-primary">
+                                <span class="icon">📷</span> Start Camera
+                            </button>
+                            <button id="btn-stop-camera" class="btn btn-danger" style="display: none;">
+                                <span class="icon">⏹</span> Stop Camera
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Camera Viewport with Canvas Overlay -->
+                    <div class="camera-container">
+                        <video id="webcam-video" class="webcam-feed" playsinline muted></video>
+                        <canvas id="output-canvas" class="overlay-canvas"></canvas>
+                        
+                        <div id="camera-placeholder" class="camera-placeholder">
+                            <svg class="camera-icon-large" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                            </svg>
+                            <p style="color: var(--text-secondary); font-size: 0.95rem;">Click <strong>Start Camera</strong> to begin live ASL tracking</p>
+                        </div>
+                    </div>
+
+                    <!-- Real-time Prediction Card -->
+                    <div class="prediction-card">
+                        <div class="prediction-header">
+                            <span class="prediction-label">Detected Sign</span>
+                            <span id="confidence-value" class="confidence-val">0%</span>
+                        </div>
+                        <div class="prediction-display-row">
+                            <div id="predicted-character" class="predicted-char-large">—</div>
+                            <div style="flex: 1; margin-left: 1.5rem; display: flex; flex-direction: column; gap: 0.5rem;">
+                                <div>
+                                    <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">
+                                        <span>Model Confidence</span>
+                                    </div>
+                                    <div class="progress-track">
+                                        <div id="confidence-bar-fill" class="progress-bar-fill"></div>
+                                    </div>
+                                </div>
+                                <div class="hold-progress-container">
+                                    <div class="hold-label">Hold sign to type:</div>
+                                    <div class="progress-track">
+                                        <div id="hold-progress-fill" class="hold-progress-fill"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Panel: Sign-to-Text Accumulator & Speech -->
+                <div class="studio-panel text-studio-panel">
+                    <div class="text-area-wrapper">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span class="prediction-label">Translated Text Buffer</span>
+                            <div class="text-meta-row">
+                                <span id="word-count">0 words</span>&nbsp;•&nbsp;<span id="char-count">0 chars</span>
+                            </div>
+                        </div>
+                        <textarea id="sign-text-buffer" class="text-buffer-input" placeholder="Signs you perform will automatically appear here as text..."></textarea>
+                    </div>
+
+                    <!-- Autocomplete suggestions -->
+                    <div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.35rem;">Smart Word Suggestions:</div>
+                        <div id="word-suggestions" class="suggestions-container"></div>
+                    </div>
+
+                    <!-- Action Button Toolbar -->
+                    <div class="action-toolbar">
+                        <button id="btn-space" class="btn btn-secondary">
+                            <span>␣ Space</span>
+                        </button>
+                        <button id="btn-backspace" class="btn btn-secondary">
+                            <span>⌫ Backspace</span>
+                        </button>
+                        <button id="btn-clear" class="btn btn-secondary">
+                            <span>✕ Clear</span>
+                        </button>
+                        <button id="btn-copy" class="btn btn-secondary">
+                            <span>📋 Copy</span>
+                        </button>
+                        <button id="btn-speak" class="btn btn-speak" style="margin-left: auto;">
+                            <span>🔊 Speak Aloud</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 2: ASL Symbol Showcase & Interactive Dictionary -->
+        <section id="dictionary-section">
+            <div class="section-header">
+                <h2 class="section-title">ASL Symbol Showcase & Dictionary</h2>
+                <p class="section-desc">Explore the complete American Sign Language library including all 26 alphabet letters, numbers 0–9, and common phrases.</p>
+            </div>
+
+            <div class="dictionary-controls">
+                <div class="filter-bar">
+                    <div class="category-tabs-group">
+                        <button class="dict-tab active" data-category="all">All Symbols</button>
+                        <button class="dict-tab" data-category="alphabet">Alphabet (A–Z)</button>
+                        <button class="dict-tab" data-category="numbers">Numbers (0–9)</button>
+                        <button class="dict-tab" data-category="phrases">Common Phrases</button>
+                    </div>
+                    <div class="search-input-wrap">
+                        <span class="search-icon">🔍</span>
+                        <input id="dict-search-input" type="text" class="search-input" placeholder="Search signs, words, or letters...">
+                    </div>
+                </div>
+            </div>
+
+            <div id="dictionary-grid" class="symbol-grid"></div>
+        </section>
+
+        <!-- Section 3: Interactive Practice & Quiz Arena -->
+        <section id="practice-section">
+            <div class="section-header">
+                <h2 class="section-title">Interactive Sign Practice & Quiz</h2>
+                <p class="section-desc">Test your signing accuracy in front of the camera and build your streak!</p>
+            </div>
+
+            <div class="practice-container">
+                <div class="practice-stats-bar">
+                    <div class="stat-item">
+                        <span class="stat-label">Practice Score</span>
+                        <span id="practice-score" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Current Streak</span>
+                        <span id="practice-streak" class="stat-value">0 🔥</span>
+                    </div>
+                    <div style="margin-left: auto;">
+                        <button id="btn-next-practice" class="btn btn-secondary">
+                            <span>Skip / Next Sign →</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="practice-card" class="practice-card-box">
+                    <div style="font-size: 0.9rem; color: var(--text-secondary);">Perform this sign in front of the camera:</div>
+                    <div id="practice-target-letter" class="target-letter-hero">A</div>
+                    <p style="color: var(--text-muted); font-size: 0.85rem;">Hold the correct hand pose steadily for 0.6s to score points</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Sign Detail Modal Dialog -->
+    <div id="sign-detail-modal" class="modal-backdrop">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-sign-title" class="section-title" style="font-size: 1.25rem;">Sign Details</h3>
+                <button id="modal-close-btn" class="modal-close-btn">&times;</button>
+            </div>
+            <div style="text-align: center; padding: 1rem 0;">
+                <div id="modal-sign-letter" class="predicted-char-large" style="font-size: 4.5rem; color: var(--accent-indigo);"></div>
+            </div>
+            <div>
+                <h4 style="font-size: 0.85rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.25rem;">Hand Pose Description</h4>
+                <p id="modal-sign-desc" style="color: var(--text-primary); font-size: 0.95rem; line-height: 1.5;"></p>
+            </div>
+            <div>
+                <h4 style="font-size: 0.85rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.25rem;">Execution Tips</h4>
+                <p id="modal-sign-tips" style="color: var(--accent-emerald-light); font-size: 0.9rem;"></p>
+            </div>
+            <div>
+                <h4 style="font-size: 0.85rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.25rem;">Common Context & Words</h4>
+                <div id="modal-common-words" style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.25rem;"></div>
+            </div>
+            <button id="modal-btn-practice" class="btn btn-primary" style="margin-top: 0.5rem;">
+                Practice This Sign in Camera
+            </button>
+        </div>
+    </div>
+
+    <!-- Application JavaScript Bundle -->
+    <script src="js/weights.js"></script>
+    <script src="js/classifier.js"></script>
+    <script src="js/gestures.js"></script>
+    <script src="js/camera.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

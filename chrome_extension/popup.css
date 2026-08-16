@@ -1,0 +1,373 @@
+/* ==========================================================================
+   Chrome Extension Popup Stylesheet
+   ========================================================================== */
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    width: 360px;
+    background-color: #0b0f19;
+    color: #f8fafc;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    overflow-x: hidden;
+}
+
+.popup-wrapper {
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    gap: 10px;
+}
+
+/* Header */
+.popup-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #1e293b;
+}
+
+.logo-box {
+    width: 28px;
+    height: 28px;
+    background: linear-gradient(135deg, #6366f1, #10b981);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 11px;
+    color: white;
+}
+
+.header-title-box {
+    flex: 1;
+    margin-left: 8px;
+}
+
+.header-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #f8fafc;
+}
+
+.status-indicator {
+    font-size: 10px;
+    color: #94a3b8;
+}
+
+.icon-btn {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.icon-btn:hover {
+    color: white;
+    background: #1e293b;
+}
+
+/* Navigation Tabs */
+.popup-nav {
+    display: flex;
+    background: #111827;
+    padding: 3px;
+    border-radius: 8px;
+    border: 1px solid #1e293b;
+    gap: 3px;
+}
+
+.tab-btn {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 6px 0;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.tab-btn.active {
+    background: #1e293b;
+    color: #f8fafc;
+}
+
+.tab-panel {
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.tab-panel.active {
+    display: flex;
+}
+
+/* Camera Viewport */
+.camera-box {
+    position: relative;
+    width: 100%;
+    height: 180px;
+    background: #020617;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid #1e293b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#popup-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+}
+
+#popup-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.camera-placeholder {
+    position: absolute;
+    inset: 0;
+    background: rgba(11, 15, 25, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+
+/* Prediction Strip */
+.pred-strip {
+    display: flex;
+    align-items: center;
+    background: #111827;
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    padding: 8px 10px;
+    gap: 10px;
+}
+
+.pred-symbol-box {
+    width: 40px;
+    height: 40px;
+    background: #1e293b;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.pred-char {
+    font-family: monospace;
+    font-size: 22px;
+    font-weight: 800;
+    color: #34d399;
+}
+
+.pred-meta-box {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.pred-meta-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.pred-label {
+    font-size: 11px;
+    color: #cbd5e1;
+    font-weight: 600;
+}
+
+.confidence-tag {
+    font-size: 11px;
+    font-family: monospace;
+    color: #10b981;
+    font-weight: 700;
+}
+
+.meter-bar {
+    width: 100%;
+    height: 4px;
+    background: #1e293b;
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.meter-fill {
+    height: 100%;
+    width: 0%;
+    background: #f59e0b;
+    transition: width 0.05s linear;
+}
+
+/* Text Buffer */
+.text-buffer-box textarea {
+    width: 100%;
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-family: monospace;
+    font-size: 13px;
+    color: #f8fafc;
+    resize: none;
+    outline: none;
+}
+
+.text-buffer-box textarea:focus {
+    border-color: #6366f1;
+}
+
+/* Buttons */
+.controls-row {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
+.btn-xs {
+    padding: 4px 8px;
+    font-size: 11px;
+    flex: 1;
+}
+
+.btn-primary {
+    background: #6366f1;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #4f46e5;
+}
+
+.btn-subtle {
+    background: #1e293b;
+    color: #cbd5e1;
+    border: 1px solid #334155;
+}
+
+.btn-subtle:hover {
+    background: #334155;
+    color: white;
+}
+
+.btn-emerald {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    padding: 8px;
+    font-size: 12px;
+}
+
+.btn-emerald:hover {
+    filter: brightness(1.1);
+}
+
+.btn-block {
+    width: 100%;
+}
+
+/* Symbol Directory Scroll List */
+.dict-search-wrap {
+    margin-bottom: 6px;
+}
+
+.search-input-mini {
+    width: 100%;
+    background: #111827;
+    border: 1px solid #1e293b;
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: #f8fafc;
+    font-size: 12px;
+    outline: none;
+}
+
+.search-input-mini:focus {
+    border-color: #6366f1;
+}
+
+.dict-list-scroll {
+    max-height: 320px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.dict-item-card {
+    background: #111827;
+    border: 1px solid #1e293b;
+    border-radius: 6px;
+    padding: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.dict-item-letter {
+    font-family: monospace;
+    font-size: 18px;
+    font-weight: 800;
+    color: #34d399;
+    min-width: 24px;
+    text-align: center;
+}
+
+.dict-item-info {
+    flex: 1;
+}
+
+.dict-item-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: #f8fafc;
+}
+
+.dict-item-desc {
+    font-size: 10px;
+    color: #94a3b8;
+    line-height: 1.3;
+}
