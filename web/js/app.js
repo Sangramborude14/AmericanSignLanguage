@@ -7,6 +7,13 @@
 document.addEventListener('DOMContentLoaded', () => {
     // Instantiate Core Modules
     const classifier = new ASLClassifier(window.ASL_MODEL_WEIGHTS);
+    const stabilizer = new PredictionStabilizer({
+        alpha: 0.45,
+        switchThreshold: 0.42,
+        holdThreshold: 0.22,
+        debounceFrames: 2,
+        gracePeriodMs: 250
+    });
     
     // UI Elements - Mode Select
     const btnModeSpelling = document.getElementById('mode-spelling');
@@ -124,46 +131,66 @@ document.addEventListener('DOMContentLoaded', () => {
     // 2. Real-Time Inference & Hold-to-Type Loop
     function handleFrameResults(results, fps) {
         fpsBadge.textContent = `${fps} FPS`;
+        const now = performance.now();
 
-        if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
-            resetPredictionDisplay();
-            return;
-        }
-
-        const landmarks = results.multiHandLandmarks[0];
-
-        // 1. Check for common special gestures first (only if Phrases Mode is enabled)
-        const commonGesture = !isSpellingMode ? CommonGestureDetector.detect(landmarks) : { detected: false };
+        const hasHands = results.multiHandLandmarks && results.multiHandLandmarks.length > 0;
         let predictedLabel = '';
         let confidence = 0;
         let isCommonPhrase = false;
 
-        if (commonGesture.detected && commonGesture.confidence > 0.85) {
-            predictedLabel = commonGesture.gesture;
-            confidence = commonGesture.confidence;
-            isCommonPhrase = true;
-            gestureTypeBadge.textContent = 'Common Sign';
-            gestureTypeBadge.className = 'badge badge-accent';
-        } else {
-            // 2. Classify alphabet keypoint (A-Z)
-            const features = classifier.preProcessLandmarks(
-                landmarks,
-                canvasElement.width,
-                canvasElement.height
-            );
+        if (hasHands) {
+            const landmarks = results.multiHandLandmarks[0];
 
-            if (features) {
-                const pred = classifier.predict(features);
-                predictedLabel = pred.label;
-                confidence = pred.confidence;
+            // 1. Check for common special gestures first (only if Phrases Mode is enabled)
+            const commonGesture = !isSpellingMode ? CommonGestureDetector.detect(landmarks) : { detected: false };
+
+            if (commonGesture.detected && commonGesture.confidence > 0.85) {
+                predictedLabel = commonGesture.gesture;
+                confidence = commonGesture.confidence;
+                isCommonPhrase = true;
+                gestureTypeBadge.textContent = 'Common Sign';
+                gestureTypeBadge.className = 'badge badge-accent';
+                stabilizer.reset();
+            } else {
+                // 2. Classify alphabet keypoint (A-Z) using deep network & stabilizer
+                const features = classifier.preProcessLandmarks(
+                    landmarks,
+                    canvasElement.width,
+                    canvasElement.height
+                );
+
+                if (features) {
+                    const rawPred = classifier.predict(features);
+                    const stabilized = stabilizer.update(
+                        rawPred.probabilities,
+                        rawPred.label,
+                        rawPred.confidence,
+                        now
+                    );
+
+                    if (stabilized.detected) {
+                        predictedLabel = stabilized.label;
+                        confidence = stabilized.confidence;
+                        isCommonPhrase = false;
+                        gestureTypeBadge.textContent = 'Alphabet (A-Z)';
+                        gestureTypeBadge.className = 'badge badge-primary';
+                    }
+                }
+            }
+        } else {
+            // Hand not detected in this frame: check grace period to prevent UI flicker
+            const stabilized = stabilizer.getState(now);
+            if (stabilized.detected) {
+                predictedLabel = stabilized.label;
+                confidence = stabilized.confidence;
                 isCommonPhrase = false;
-                gestureTypeBadge.textContent = 'Alphabet (A-Z)';
-                gestureTypeBadge.className = 'badge badge-primary';
             }
         }
 
-        if (!predictedLabel || confidence < 0.40) {
-            resetPredictionDisplay();
+        if (!predictedLabel || confidence < 0.35) {
+            if (!hasHands) {
+                resetPredictionDisplay();
+            }
             return;
         }
 
@@ -177,7 +204,6 @@ document.addEventListener('DOMContentLoaded', () => {
         checkPracticeMatch(predictedLabel, confidence);
 
         // Hold-to-type debouncer
-        const now = performance.now();
         if (currentPrediction === predictedLabel) {
             if (!holdStartTime) holdStartTime = now;
             const elapsed = now - holdStartTime;
@@ -208,6 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentPrediction = null;
         holdStartTime = null;
         lastTypedChar = null;
+        stabilizer.reset();
         predictedCharEl.textContent = '—';
         confidenceValEl.textContent = '0%';
         confidenceBarEl.style.width = '0%';

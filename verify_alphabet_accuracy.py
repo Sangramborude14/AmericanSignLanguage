@@ -41,27 +41,30 @@ def main():
     print(f"Test samples for validation: {len(X_test)}")
 
     # 2. Build model and load weights from npz
-    model = tf.keras.models.Sequential([
-        tf.keras.layers.Input((21 * 2, )),
-        tf.keras.layers.BatchNormalization(),
-        tf.keras.layers.Dense(128, activation='mish'),
-        tf.keras.layers.Dropout(0.5),
-        tf.keras.layers.Dense(64, activation='mish'),
-        tf.keras.layers.Dropout(0.5),
-        tf.keras.layers.Dense(32, activation='mish'),
-        tf.keras.layers.Dense(26, activation='softmax')
-    ])
+    inputs = tf.keras.layers.Input(shape=(42,))
+    x = tf.keras.layers.BatchNormalization()(inputs)
+    x = tf.keras.layers.Dense(256, activation='mish')(x)
+    x = tf.keras.layers.Dropout(0.2)(x)
+    x = tf.keras.layers.Dense(256, activation='mish')(x)
+    x = tf.keras.layers.Dropout(0.2)(x)
+    x = tf.keras.layers.Dense(128, activation='mish')(x)
+    x = tf.keras.layers.Dropout(0.15)(x)
+    x = tf.keras.layers.Dense(64, activation='mish')(x)
+    outputs = tf.keras.layers.Dense(26, activation='softmax')(x)
+
+    model = tf.keras.Model(inputs=inputs, outputs=outputs)
     
     # Force layer building
     model.predict(np.zeros((1, 42), dtype='float32'), verbose=0)
     
     # Load weights manually from npz
     weights = np.load(npz_path)
-    model.layers[0].set_weights([weights['bn_gamma'], weights['bn_beta'], weights['bn_mean'], weights['bn_var']])
-    model.layers[1].set_weights([weights['w0'], weights['b0']])
-    model.layers[3].set_weights([weights['w1'], weights['b1']])
-    model.layers[5].set_weights([weights['w2'], weights['b2']])
-    model.layers[6].set_weights([weights['w3'], weights['b3']])
+    model.layers[1].set_weights([weights['bn_gamma'], weights['bn_beta'], weights['bn_mean'], weights['bn_var']])
+    model.layers[2].set_weights([weights['w0'], weights['b0']])
+    model.layers[4].set_weights([weights['w1'], weights['b1']])
+    model.layers[6].set_weights([weights['w2'], weights['b2']])
+    model.layers[8].set_weights([weights['w3'], weights['b3']])
+    model.layers[9].set_weights([weights['w4'], weights['b4']])
 
     # 3. Predict on test set
     predictions = model.predict(X_test, verbose=0)

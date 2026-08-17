@@ -1,6 +1,7 @@
 /**
  * ASL Camera & MediaPipe Hand Tracking Manager
  * Handles camera capture, MediaPipe Hands pipeline, and 60 FPS HTML5 Canvas visual overlay
+ * Includes coordinate smoothing to eliminate visual skeleton vibration and bounding box flicker.
  */
 
 class CameraManager {
@@ -13,6 +14,12 @@ class CameraManager {
         this.hands = null;
         this.camera = null;
         this.isRunning = false;
+
+        // Visual smoothing state
+        this.prevLandmarksPerHand = [];
+        this.prevBboxPerHand = [];
+        this.landmarkSmoothAlpha = 0.72; // EMA smoothing factor (0.72 new, 0.28 prev)
+        this.bboxSmoothAlpha = 0.65;
 
         // FPS tracking
         this.fps = 0;
@@ -86,6 +93,8 @@ class CameraManager {
             this.canvas.height = this.video.videoHeight || 480;
 
             this.isRunning = true;
+            this.prevLandmarksPerHand = [];
+            this.prevBboxPerHand = [];
             this.processLoop();
             return true;
         } catch (err) {
@@ -104,6 +113,8 @@ class CameraManager {
         if (this.ctx) {
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         }
+        this.prevLandmarksPerHand = [];
+        this.prevBboxPerHand = [];
     }
 
     async processLoop() {
@@ -127,6 +138,31 @@ class CameraManager {
         }
     }
 
+    /**
+     * Smooths raw landmarks to eliminate jitter
+     */
+    smoothLandmarks(rawLandmarks, handIdx) {
+        const prev = this.prevLandmarksPerHand[handIdx];
+        if (!prev || prev.length !== rawLandmarks.length) {
+            this.prevLandmarksPerHand[handIdx] = rawLandmarks.map(lm => ({ x: lm.x, y: lm.y, z: lm.z }));
+            return rawLandmarks;
+        }
+
+        const smoothed = [];
+        const alpha = this.landmarkSmoothAlpha;
+        for (let i = 0; i < rawLandmarks.length; i++) {
+            const r = rawLandmarks[i];
+            const p = prev[i];
+            const sx = alpha * r.x + (1 - alpha) * p.x;
+            const sy = alpha * r.y + (1 - alpha) * p.y;
+            const sz = alpha * (r.z || 0) + (1 - alpha) * (p.z || 0);
+            smoothed.push({ x: sx, y: sy, z: sz });
+        }
+
+        this.prevLandmarksPerHand[handIdx] = smoothed;
+        return smoothed;
+    }
+
     handleResults(results) {
         const { width, height } = this.canvas;
         this.ctx.save();
@@ -138,19 +174,20 @@ class CameraManager {
 
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
             for (let h = 0; h < results.multiHandLandmarks.length; h++) {
-                const landmarks = results.multiHandLandmarks[h];
-                const handedness = results.multiHandedness && results.multiHandedness[h]
-                    ? results.multiHandedness[h].label
-                    : 'Hand';
+                const rawLandmarks = results.multiHandLandmarks[h];
+                const smoothedLandmarks = this.smoothLandmarks(rawLandmarks, h);
 
-                // Draw bones/connections
-                this.drawSkeleton(landmarks, width, height);
+                // Draw bones/connections with smoothed coordinates
+                this.drawSkeleton(smoothedLandmarks, width, height);
                 // Draw joint landmarks
-                this.drawLandmarks(landmarks, width, height);
-                // Draw bounding box
-                const bbox = this.calculateBoundingBox(landmarks, width, height);
+                this.drawLandmarks(smoothedLandmarks, width, height);
+                // Draw stabilized bounding box
+                const bbox = this.calculateBoundingBox(smoothedLandmarks, width, height, h);
                 this.drawBoundingBox(bbox);
             }
+        } else {
+            this.prevLandmarksPerHand = [];
+            this.prevBboxPerHand = [];
         }
 
         this.ctx.restore();
@@ -162,8 +199,8 @@ class CameraManager {
     }
 
     drawSkeleton(landmarks, width, height) {
-        this.ctx.lineWidth = 3;
-        this.ctx.strokeStyle = 'rgba(99, 102, 241, 0.75)'; // Indigo
+        this.ctx.lineWidth = 3.5;
+        this.ctx.strokeStyle = 'rgba(99, 102, 241, 0.85)'; // Indigo
         this.ctx.lineCap = 'round';
         this.ctx.lineJoin = 'round';
 
@@ -189,7 +226,7 @@ class CameraManager {
             const isWrist = i === 0;
 
             this.ctx.beginPath();
-            this.ctx.arc(x, y, isFingertip ? 6 : (isWrist ? 7 : 4), 0, 2 * Math.PI);
+            this.ctx.arc(x, y, isFingertip ? 6.5 : (isWrist ? 7.5 : 4.5), 0, 2 * Math.PI);
             this.ctx.fillStyle = isFingertip ? '#10b981' : (isWrist ? '#f59e0b' : '#ffffff');
             this.ctx.fill();
 
@@ -199,7 +236,7 @@ class CameraManager {
         }
     }
 
-    calculateBoundingBox(landmarks, width, height) {
+    calculateBoundingBox(landmarks, width, height, handIdx = 0) {
         let minX = Infinity, minY = Infinity;
         let maxX = -Infinity, maxY = -Infinity;
 
@@ -213,16 +250,33 @@ class CameraManager {
         }
 
         const padding = 24;
-        return {
+        const targetBbox = {
             x: Math.max(0, minX - padding),
             y: Math.max(0, minY - padding),
             width: Math.min(width, (maxX - minX) + padding * 2),
             height: Math.min(height, (maxY - minY) + padding * 2)
         };
+
+        const prevBbox = this.prevBboxPerHand[handIdx];
+        if (!prevBbox) {
+            this.prevBboxPerHand[handIdx] = targetBbox;
+            return targetBbox;
+        }
+
+        const alpha = this.bboxSmoothAlpha;
+        const smoothedBbox = {
+            x: alpha * targetBbox.x + (1 - alpha) * prevBbox.x,
+            y: alpha * targetBbox.y + (1 - alpha) * prevBbox.y,
+            width: alpha * targetBbox.width + (1 - alpha) * prevBbox.width,
+            height: alpha * targetBbox.height + (1 - alpha) * prevBbox.height
+        };
+
+        this.prevBboxPerHand[handIdx] = smoothedBbox;
+        return smoothedBbox;
     }
 
     drawBoundingBox(bbox) {
-        this.ctx.strokeStyle = 'rgba(16, 185, 129, 0.6)';
+        this.ctx.strokeStyle = 'rgba(16, 185, 129, 0.75)';
         this.ctx.lineWidth = 2;
         this.ctx.setLineDash([8, 6]);
         this.ctx.strokeRect(bbox.x, bbox.y, bbox.width, bbox.height);
@@ -235,3 +289,4 @@ if (typeof module !== 'undefined' && module.exports) {
 } else if (typeof window !== 'undefined') {
     window.CameraManager = CameraManager;
 }
+

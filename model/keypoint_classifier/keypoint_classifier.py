@@ -26,6 +26,8 @@ class KeyPointClassifier(object):
         self.b2 = weights["b2"]
         self.w3 = weights["w3"]
         self.b3 = weights["b3"]
+        self.w4 = weights["w4"]
+        self.b4 = weights["b4"]
 
     def _softplus(self, x):
         return np.log1p(np.exp(-np.abs(x))) + np.maximum(x, 0)
@@ -37,30 +39,37 @@ class KeyPointClassifier(object):
         e_x = np.exp(x - np.max(x, axis=-1, keepdims=True))
         return e_x / np.sum(e_x, axis=-1, keepdims=True)
 
-    def __call__(
-        self,
-        landmark_list,
-    ):
+    def predict_probabilities(self, landmark_list):
         x = np.array([landmark_list], dtype=np.float32)
         
         # 1. Batch Normalization (epsilon=0.001)
         x = (x - self.bn_mean) / np.sqrt(self.bn_var + 0.001) * self.bn_gamma + self.bn_beta
         
-        # 2. Dense layer 0 + Mish
+        # 2. Dense layer 0 (256) + Mish
         x = x @ self.w0 + self.b0
         x = self._mish(x)
         
-        # 3. Dense layer 1 + Mish
+        # 3. Dense layer 1 (256) + Mish
         x = x @ self.w1 + self.b1
         x = self._mish(x)
         
-        # 4. Dense layer 2 + Mish
+        # 4. Dense layer 2 (128) + Mish
         x = x @ self.w2 + self.b2
         x = self._mish(x)
         
-        # 5. Dense layer 3 + Softmax
+        # 5. Dense layer 3 (64) + Mish
         x = x @ self.w3 + self.b3
-        result = self._softmax(x)
+        x = self._mish(x)
         
-        result_index = np.argmax(np.squeeze(result))
-        return result_index
+        # 6. Dense layer 4 (26) + Softmax
+        x = x @ self.w4 + self.b4
+        result = self._softmax(x)
+        return np.squeeze(result)
+
+    def __call__(
+        self,
+        landmark_list,
+    ):
+        probs = self.predict_probabilities(landmark_list)
+        return int(np.argmax(probs))
+

@@ -4,6 +4,13 @@
 
 document.addEventListener('DOMContentLoaded', () => {
     const classifier = new ASLClassifier(window.ASL_MODEL_WEIGHTS);
+    const stabilizer = new PredictionStabilizer({
+        alpha: 0.45,
+        switchThreshold: 0.42,
+        holdThreshold: 0.22,
+        debounceFrames: 2,
+        gracePeriodMs: 250
+    });
 
     // UI elements
     const video = document.getElementById('popup-video');
@@ -154,67 +161,76 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.translate(canvas.width, 0);
         ctx.scale(-1, 1);
+        const now = performance.now();
 
-        if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
-            predCharEl.textContent = '—';
-            predLabelEl.textContent = 'No hand detected';
-            confidenceEl.textContent = '0%';
-            holdFillEl.style.width = '0%';
-            currentPred = null;
-            holdStart = null;
-            lastTyped = null;
-            ctx.restore();
-            return;
-        }
-
-        const lms = results.multiHandLandmarks[0];
-
-        // Draw connections
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = '#6366f1';
-        for (let i = 0; i < lms.length; i++) {
-            const x = lms[i].x * canvas.width;
-            const y = lms[i].y * canvas.height;
-            ctx.beginPath();
-            ctx.arc(x, y, 3, 0, 2 * Math.PI);
-            ctx.fillStyle = '#10b981';
-            ctx.fill();
-        }
-        ctx.restore();
-
-        // 1. Check special gestures (only if Phrases Mode is enabled)
-        const special = !isSpellingMode ? CommonGestureDetector.detect(lms) : { detected: false };
+        const hasHands = results.multiHandLandmarks && results.multiHandLandmarks.length > 0;
         let label = '';
         let conf = 0;
         let isSpecial = false;
 
-        if (special.detected && special.confidence > 0.85) {
-            label = special.gesture;
-            conf = special.confidence;
-            isSpecial = true;
+        if (hasHands) {
+            const lms = results.multiHandLandmarks[0];
+
+            // Draw connections
+            ctx.lineWidth = 2.5;
+            ctx.strokeStyle = '#6366f1';
+            for (let i = 0; i < lms.length; i++) {
+                const x = lms[i].x * canvas.width;
+                const y = lms[i].y * canvas.height;
+                ctx.beginPath();
+                ctx.arc(x, y, 3.5, 0, 2 * Math.PI);
+                ctx.fillStyle = '#10b981';
+                ctx.fill();
+            }
+
+            // 1. Check special gestures (only if Phrases Mode is enabled)
+            const special = !isSpellingMode ? CommonGestureDetector.detect(lms) : { detected: false };
+
+            if (special.detected && special.confidence > 0.85) {
+                label = special.gesture;
+                conf = special.confidence;
+                isSpecial = true;
+                stabilizer.reset();
+            } else {
+                const features = classifier.preProcessLandmarks(lms, canvas.width, canvas.height);
+                if (features) {
+                    const p = classifier.predict(features);
+                    const stabilized = stabilizer.update(p.probabilities, p.label, p.confidence, now);
+                    if (stabilized.detected) {
+                        label = stabilized.label;
+                        conf = stabilized.confidence;
+                    }
+                }
+            }
         } else {
-            const features = classifier.preProcessLandmarks(lms, canvas.width, canvas.height);
-            if (features) {
-                const p = classifier.predict(features);
-                label = p.label;
-                conf = p.confidence;
+            // Hand not detected in this frame: check grace period to prevent flickering
+            const stabilized = stabilizer.getState(now);
+            if (stabilized.detected) {
+                label = stabilized.label;
+                conf = stabilized.confidence;
             }
         }
+        ctx.restore();
 
-        if (!label || conf < 0.45) {
-            predCharEl.textContent = '—';
-            predLabelEl.textContent = 'Unclear sign';
-            confidenceEl.textContent = '0%';
-            holdFillEl.style.width = '0%';
+        if (!label || conf < 0.35) {
+            if (!hasHands) {
+                predCharEl.textContent = '—';
+                predLabelEl.textContent = 'No hand detected';
+                confidenceEl.textContent = '0%';
+                holdFillEl.style.width = '0%';
+                currentPred = null;
+                holdStart = null;
+                lastTyped = null;
+                stabilizer.reset();
+            }
             return;
         }
 
         predCharEl.textContent = label;
-        predLabelEl.textContent = isSpecial ? special.label : `Letter ${label}`;
+        predLabelEl.textContent = isSpecial ? (special ? special.label : label) : `Letter ${label}`;
         confidenceEl.textContent = `${Math.round(conf * 100)}%`;
 
         // Hold-to-type debounce
-        const now = performance.now();
         if (currentPred === label) {
             if (!holdStart) holdStart = now;
             const elapsed = now - holdStart;

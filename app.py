@@ -101,6 +101,73 @@ def get_args():
     return args
 
 
+class PythonPredictionStabilizer:
+    def __init__(self, alpha=0.45, switch_thresh=0.42, hold_thresh=0.22, debounce_frames=2):
+        self.alpha = alpha
+        self.switch_thresh = switch_thresh
+        self.hold_thresh = hold_thresh
+        self.debounce_frames = debounce_frames
+        self.smoothed_probs = np.zeros(26, dtype=np.float32)
+        self.current_idx = None
+        self.candidate_idx = None
+        self.candidate_count = 0
+        self.is_init = False
+
+    def update(self, raw_probs):
+        if not self.is_init:
+            self.smoothed_probs = np.array(raw_probs, dtype=np.float32)
+            self.is_init = True
+        else:
+            self.smoothed_probs = self.alpha * np.array(raw_probs, dtype=np.float32) + (1.0 - self.alpha) * self.smoothed_probs
+
+        top_idx = int(np.argmax(self.smoothed_probs))
+        top_prob = float(self.smoothed_probs[top_idx])
+
+        if self.current_idx is None:
+            if top_prob >= self.switch_thresh:
+                self.current_idx = top_idx
+                self.candidate_idx = None
+                self.candidate_count = 0
+        elif self.current_idx == top_idx:
+            self.candidate_idx = None
+            self.candidate_count = 0
+        else:
+            current_prob = float(self.smoothed_probs[self.current_idx])
+            if self.candidate_idx == top_idx:
+                self.candidate_count += 1
+            else:
+                self.candidate_idx = top_idx
+                self.candidate_count = 1
+
+            should_switch = (top_prob >= self.switch_thresh and self.candidate_count >= self.debounce_frames) or \
+                            (current_prob < self.hold_thresh and top_prob > current_prob + 0.15)
+            if should_switch:
+                self.current_idx = top_idx
+                self.candidate_idx = None
+                self.candidate_count = 0
+
+        conf = float(self.smoothed_probs[self.current_idx]) if self.current_idx is not None else 0.0
+        return self.current_idx, conf
+
+    def reset(self):
+        self.current_idx = None
+        self.candidate_idx = None
+        self.candidate_count = 0
+        self.is_init = False
+        self.smoothed_probs.fill(0)
+
+
+def smooth_landmarks(prev_landmarks, current_landmarks, alpha=0.72):
+    if prev_landmarks is None or len(prev_landmarks) != len(current_landmarks):
+        return current_landmarks
+    smoothed = []
+    for (px, py), (cx, cy) in zip(prev_landmarks, current_landmarks):
+        sx = int(alpha * cx + (1 - alpha) * px)
+        sy = int(alpha * cy + (1 - alpha) * py)
+        smoothed.append([sx, sy])
+    return smoothed
+
+
 def main():
     # Argument parsing #################################################################
     args = get_args()
@@ -129,6 +196,8 @@ def main():
     )
 
     keypoint_classifier = KeyPointClassifier()
+    stabilizer = PythonPredictionStabilizer()
+    prev_landmarks_dict = {}
 
     # Read labels ###########################################################
     with open(
@@ -244,35 +313,47 @@ def main():
             break
         else:
             if results.multi_hand_landmarks is not None:
-                for hand_landmarks, handedness in zip(
-                    results.multi_hand_landmarks, results.multi_handedness
+                for h_idx, (hand_landmarks, handedness) in enumerate(
+                    zip(results.multi_hand_landmarks, results.multi_handedness)
                 ):
+                    # Landmark calculation
+                    raw_landmark_list = calc_landmark_list(debug_image, hand_landmarks)
+                    
+                    # Smooth landmark points
+                    smoothed_landmark_list = smooth_landmarks(
+                        prev_landmarks_dict.get(h_idx), raw_landmark_list
+                    )
+                    prev_landmarks_dict[h_idx] = smoothed_landmark_list
+
                     # Bounding box calculation
                     brect = calc_bounding_rect(debug_image, hand_landmarks)
-                    # Landmark calculation
-                    landmark_list = calc_landmark_list(debug_image, hand_landmarks)
 
                     # Conversion to relative coordinates / normalized coordinates
-                    pre_processed_landmark_list = pre_process_landmark(landmark_list)
+                    pre_processed_landmark_list = pre_process_landmark(raw_landmark_list)
 
                     # Write to the dataset file
                     logging_csv(number, mode, pre_processed_landmark_list)
 
-                    # Hand sign classification
-                    hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
+                    # Hand sign classification with probabilities & stabilizer
+                    raw_probs = keypoint_classifier.predict_probabilities(pre_processed_landmark_list)
+                    hand_sign_id, conf = stabilizer.update(raw_probs)
 
-                    # Finger gesture classification
-                    finger_gesture_id = 0
+                    label_text = ""
+                    if hand_sign_id is not None and conf >= 0.35 and hand_sign_id < len(keypoint_classifier_labels):
+                        label_text = f"{keypoint_classifier_labels[hand_sign_id]} ({int(conf * 100)}%)"
 
                     # Drawing part
                     debug_image = draw_bounding_rect(use_brect, debug_image, brect)
-                    debug_image = draw_landmarks(debug_image, landmark_list)
+                    debug_image = draw_landmarks(debug_image, smoothed_landmark_list)
                     debug_image = draw_info_text(
                         debug_image,
                         brect,
                         handedness,
-                        keypoint_classifier_labels[hand_sign_id],
+                        label_text,
                     )
+            else:
+                stabilizer.reset()
+                prev_landmarks_dict.clear()
 
             debug_image = draw_info(debug_image, fps, mode, number)
 

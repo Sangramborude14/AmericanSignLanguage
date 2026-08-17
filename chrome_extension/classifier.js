@@ -1,8 +1,8 @@
 /**
- * ASL KeyPoint Classifier (JavaScript Implementation)
+ * ASL KeyPoint Classifier & Prediction Stabilizer (JavaScript Implementation)
  * Exact neural network reproduction of model/keypoint_classifier/keypoint_classifier.py
  * Architecture:
- *   Input (42) -> BatchNorm -> Dense(128)+Mish -> Dense(64)+Mish -> Dense(32)+Mish -> Dense(26)+Softmax
+ *   Input (42) -> BatchNorm -> Dense(256)+Mish -> Dense(256)+Mish -> Dense(128)+Mish -> Dense(64)+Mish -> Dense(26)+Softmax
  */
 
 class ASLClassifier {
@@ -150,7 +150,8 @@ class ASLClassifier {
             w0, b0,
             w1, b1,
             w2, b2,
-            w3, b3
+            w3, b3,
+            w4, b4
         } = this.weights;
 
         // 1. Batch Normalization: (x - mean) / sqrt(var + 0.001) * gamma + beta
@@ -160,20 +161,24 @@ class ASLClassifier {
             xBn[i] = ((features[i] - bn_mean[i]) / std) * bn_gamma[i] + bn_beta[i];
         }
 
-        // 2. Layer 0: Dense(128) + Mish
+        // 2. Layer 0: Dense(256) + Mish
         const l0 = this._dense(xBn, w0, b0);
         for (let i = 0; i < l0.length; i++) l0[i] = this._mish(l0[i]);
 
-        // 3. Layer 1: Dense(64) + Mish
+        // 3. Layer 1: Dense(256) + Mish
         const l1 = this._dense(l0, w1, b1);
         for (let i = 0; i < l1.length; i++) l1[i] = this._mish(l1[i]);
 
-        // 4. Layer 2: Dense(32) + Mish
+        // 4. Layer 2: Dense(128) + Mish
         const l2 = this._dense(l1, w2, b2);
         for (let i = 0; i < l2.length; i++) l2[i] = this._mish(l2[i]);
 
-        // 5. Layer 3: Dense(26) + Softmax
-        const logits = this._dense(l2, w3, b3);
+        // 5. Layer 3: Dense(64) + Mish
+        const l3 = this._dense(l2, w3, b3);
+        for (let i = 0; i < l3.length; i++) l3[i] = this._mish(l3[i]);
+
+        // 6. Layer 4: Dense(26) + Softmax
+        const logits = this._dense(l3, w4, b4);
         const probs = this._softmax(logits);
 
         // Find argmax
@@ -195,8 +200,164 @@ class ASLClassifier {
     }
 }
 
+/**
+ * Prediction Stabilizer
+ * Eliminates alphabet prediction flickering and rapid jitter using:
+ * 1. Exponential Moving Average (EMA) of softmax probability distributions
+ * 2. Confidence hysteresis (high activation threshold to switch, lower to maintain)
+ * 3. Consecutive-frame debouncing
+ * 4. Tracking dropout grace period (holds state through 1-2 dropped frames instead of flashing blank)
+ */
+class PredictionStabilizer {
+    constructor(options = {}) {
+        this.alpha = options.alpha !== undefined ? options.alpha : 0.45;
+        this.switchThreshold = options.switchThreshold || 0.42;
+        this.holdThreshold = options.holdThreshold || 0.22;
+        this.debounceFrames = options.debounceFrames || 2;
+        this.gracePeriodMs = options.gracePeriodMs || 220;
+
+        this.labels = [
+            'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
+            'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
+            'U', 'V', 'W', 'X', 'Y', 'Z'
+        ];
+
+        this.smoothedProbabilities = new Float32Array(26);
+        this.currentLabel = null;
+        this.currentIndex = -1;
+        this.currentConfidence = 0;
+        this.candidateLabel = null;
+        this.candidateCount = 0;
+        this.lastDetectionTime = 0;
+        this.isInitialized = false;
+    }
+
+    /**
+     * Update stabilizer with new raw frame prediction
+     */
+    update(rawProbabilities, rawLabel, rawConfidence, timestamp = performance.now()) {
+        this.lastDetectionTime = timestamp;
+
+        if (!this.isInitialized) {
+            for (let i = 0; i < 26; i++) {
+                this.smoothedProbabilities[i] = rawProbabilities[i];
+            }
+            this.isInitialized = true;
+        } else {
+            // Apply Exponential Moving Average: S_t = alpha * Y_t + (1 - alpha) * S_{t-1}
+            for (let i = 0; i < 26; i++) {
+                this.smoothedProbabilities[i] = this.alpha * rawProbabilities[i] + (1 - this.alpha) * this.smoothedProbabilities[i];
+            }
+        }
+
+        // Find top smoothed class
+        let topIndex = 0;
+        let topProb = -1;
+        for (let i = 0; i < 26; i++) {
+            if (this.smoothedProbabilities[i] > topProb) {
+                topProb = this.smoothedProbabilities[i];
+                topIndex = i;
+            }
+        }
+        const topLabel = this.labels[topIndex];
+
+        // Hysteresis & Debounce decision logic
+        if (!this.currentLabel) {
+            if (topProb >= this.switchThreshold) {
+                this.currentLabel = topLabel;
+                this.currentIndex = topIndex;
+                this.currentConfidence = topProb;
+                this.candidateLabel = null;
+                this.candidateCount = 0;
+            }
+        } else if (this.currentLabel === topLabel) {
+            // Reinforce current active label
+            this.currentConfidence = topProb;
+            this.candidateLabel = null;
+            this.candidateCount = 0;
+        } else {
+            // Different candidate trying to take over
+            const currentProb = this.smoothedProbabilities[this.currentIndex] || 0;
+            
+            if (this.candidateLabel === topLabel) {
+                this.candidateCount++;
+            } else {
+                this.candidateLabel = topLabel;
+                this.candidateCount = 1;
+            }
+
+            // Switch conditions:
+            // 1. Candidate exceeds switch threshold AND leads for debounceFrames, OR
+            // 2. Current label confidence collapsed below holdThreshold and candidate is significantly stronger
+            const shouldSwitch = (topProb >= this.switchThreshold && this.candidateCount >= this.debounceFrames) ||
+                                 (currentProb < this.holdThreshold && topProb > currentProb + 0.15);
+
+            if (shouldSwitch) {
+                this.currentLabel = topLabel;
+                this.currentIndex = topIndex;
+                this.currentConfidence = topProb;
+                this.candidateLabel = null;
+                this.candidateCount = 0;
+            } else {
+                // Maintain current label with its current smoothed confidence
+                this.currentConfidence = Math.max(currentProb, this.holdThreshold);
+            }
+        }
+
+        return this.getState();
+    }
+
+    /**
+     * Get current stabilized state with grace period handling
+     */
+    getState(timestamp = performance.now()) {
+        if (!this.currentLabel) {
+            return {
+                detected: false,
+                label: null,
+                index: -1,
+                confidence: 0,
+                probabilities: Array.from(this.smoothedProbabilities)
+            };
+        }
+
+        const elapsedSinceDetection = timestamp - this.lastDetectionTime;
+        if (elapsedSinceDetection > this.gracePeriodMs) {
+            this.reset();
+            return {
+                detected: false,
+                label: null,
+                index: -1,
+                confidence: 0,
+                probabilities: Array.from(this.smoothedProbabilities)
+            };
+        }
+
+        return {
+            detected: true,
+            label: this.currentLabel,
+            index: this.currentIndex,
+            confidence: this.currentConfidence,
+            probabilities: Array.from(this.smoothedProbabilities),
+            isGracePeriod: elapsedSinceDetection > 40
+        };
+    }
+
+    reset() {
+        this.currentLabel = null;
+        this.currentIndex = -1;
+        this.currentConfidence = 0;
+        this.candidateLabel = null;
+        this.candidateCount = 0;
+        this.isInitialized = false;
+        this.smoothedProbabilities.fill(0);
+    }
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { ASLClassifier };
+    module.exports = { ASLClassifier, PredictionStabilizer };
 } else if (typeof window !== 'undefined') {
     window.ASLClassifier = ASLClassifier;
+    window.PredictionStabilizer = PredictionStabilizer;
 }
+
