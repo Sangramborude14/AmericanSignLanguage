@@ -67,6 +67,21 @@ class CameraManager {
         this.hands.onResults((results) => {
             this.handleResults(results);
         });
+
+        if (typeof FaceMesh !== 'undefined') {
+            this.faceMesh = new FaceMesh({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+            });
+            this.faceMesh.setOptions({
+                maxNumFaces: 1,
+                refineLandmarks: false,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+            this.faceMesh.onResults((faceResults) => {
+                this.latestFaceResults = faceResults;
+            });
+        }
     }
 
     async start() {
@@ -129,8 +144,13 @@ class CameraManager {
             this.lastFpsUpdate = now;
         }
 
-        if (this.hands && this.video.readyState >= 2) {
-            await this.hands.send({ image: this.video });
+        if (this.video.readyState >= 2) {
+            if (this.hands) {
+                await this.hands.send({ image: this.video });
+            }
+            if (this.faceMesh) {
+                await this.faceMesh.send({ image: this.video });
+            }
         }
 
         if (this.isRunning) {
@@ -194,7 +214,7 @@ class CameraManager {
 
         // Pass results up to application controller
         if (this.onResults) {
-            this.onResults(results, this.fps);
+            this.onResults(results, this.fps, this.latestFaceResults);
         }
     }
 

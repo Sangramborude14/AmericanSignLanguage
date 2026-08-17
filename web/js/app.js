@@ -93,9 +93,31 @@ document.addEventListener('DOMContentLoaded', () => {
     let practiceStreak = 0;
     let practiceMatchStartTime = null;
 
+    // Head Gesture Detector (Sideways Head Nod -> Backspace)
+    const headGestureDetector = typeof HeadGestureDetector !== 'undefined' ? new HeadGestureDetector({
+        cooldownMs: 650,
+        timeWindowMs: 850
+    }) : null;
+
+    function performBackspace(reason = 'Head Nod') {
+        if (!textBuffer) return;
+        textBuffer = textBuffer.slice(0, -1);
+        updateTextBufferUI();
+
+        gestureTypeBadge.textContent = `⌫ Backspace (${reason})`;
+        gestureTypeBadge.className = 'badge badge-danger';
+
+        const container = document.querySelector('.text-studio-card') || textBufferEl;
+        if (container) {
+            container.style.transition = 'border-color 0.15s ease';
+            container.style.borderColor = '#f43f5e';
+            setTimeout(() => { container.style.borderColor = ''; }, 300);
+        }
+    }
+
     // 1. Initialize Camera
-    const cameraManager = new CameraManager(videoElement, canvasElement, (results, fps) => {
-        handleFrameResults(results, fps);
+    const cameraManager = new CameraManager(videoElement, canvasElement, (results, fps, faceResults) => {
+        handleFrameResults(results, fps, faceResults);
     });
 
     startCamBtn.addEventListener('click', async () => {
@@ -126,12 +148,22 @@ document.addEventListener('DOMContentLoaded', () => {
         statusBadge.className = 'badge badge-neutral';
         fpsBadge.textContent = '0 FPS';
         resetPredictionDisplay();
+        if (headGestureDetector) headGestureDetector.reset();
     });
 
     // 2. Real-Time Inference & Hold-to-Type Loop
-    function handleFrameResults(results, fps) {
+    function handleFrameResults(results, fps, faceResults) {
         fpsBadge.textContent = `${fps} FPS`;
         const now = performance.now();
+
+        // 0. Check Sideways Head Nod (Head Shake "NO") -> Trigger Backspace
+        if (headGestureDetector && faceResults && faceResults.multiFaceLandmarks && faceResults.multiFaceLandmarks.length > 0) {
+            const faceLandmarks = faceResults.multiFaceLandmarks[0];
+            const headRes = headGestureDetector.update(faceLandmarks, now);
+            if (headRes.detected && headRes.action === 'BACKSPACE') {
+                performBackspace('Head Nod');
+            }
+        }
 
         const hasHands = results.multiHandLandmarks && results.multiHandLandmarks.length > 0;
         let predictedLabel = '';

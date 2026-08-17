@@ -157,6 +157,56 @@ class PythonPredictionStabilizer:
         self.smoothed_probs.fill(0)
 
 
+class PythonHeadGestureDetector:
+    def __init__(self, cooldown_ms=650, time_window_ms=850):
+        self.cooldown_ms = cooldown_ms
+        self.time_window_ms = time_window_ms
+        self.last_trigger_time = 0
+        self.history = []
+        self.current_state = 'CENTER'
+
+    def update_from_landmarks(self, landmark_list, timestamp_ms):
+        if landmark_list is None or len(landmark_list) < 21:
+            return False
+            
+        if timestamp_ms - self.last_trigger_time < self.cooldown_ms:
+            return False
+
+        wrist = landmark_list[0]
+        middle_mcp = landmark_list[9]
+        index_mcp = landmark_list[5]
+        pinky_mcp = landmark_list[17]
+
+        palm_width = np.hypot(pinky_mcp[0] - index_mcp[0], pinky_mcp[1] - index_mcp[1])
+        if palm_width < 5:
+            return False
+
+        dx = middle_mcp[0] - wrist[0]
+        tilt_ratio = dx / float(palm_width)
+
+        new_state = 'CENTER'
+        if tilt_ratio < -0.45:
+            new_state = 'LEFT'
+        elif tilt_ratio > 0.45:
+            new_state = 'RIGHT'
+
+        if new_state != self.current_state:
+            if new_state in ('LEFT', 'RIGHT'):
+                self.history.append((new_state, timestamp_ms))
+                self.history = [h for h in self.history if timestamp_ms - h[1] <= self.time_window_ms]
+            self.current_state = new_state
+
+        if len(self.history) >= 2:
+            states = [h[0] for h in self.history]
+            if 'LEFT' in states and 'RIGHT' in states:
+                self.last_trigger_time = timestamp_ms
+                self.history = []
+                self.current_state = 'CENTER'
+                return True
+
+        return False
+
+
 def smooth_landmarks(prev_landmarks, current_landmarks, alpha=0.72):
     if prev_landmarks is None or len(prev_landmarks) != len(current_landmarks):
         return current_landmarks
